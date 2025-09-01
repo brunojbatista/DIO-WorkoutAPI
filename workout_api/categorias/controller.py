@@ -1,6 +1,7 @@
 from uuid import uuid4
 from fastapi import APIRouter, Body, HTTPException, status
 from pydantic import UUID4
+from sqlalchemy.exc import IntegrityError
 from workout_api.categorias.schemas import CategoriaIn, CategoriaOut
 from workout_api.categorias.models import CategoriaModel
 
@@ -19,11 +20,40 @@ async def post(
     db_session: DatabaseDependency, 
     categoria_in: CategoriaIn = Body(...)
 ) -> CategoriaOut:
-    categoria_out = CategoriaOut(id=uuid4(), **categoria_in.model_dump())
-    categoria_model = CategoriaModel(**categoria_out.model_dump())
-    
-    db_session.add(categoria_model)
-    await db_session.commit()
+    try:
+        categoria_out = CategoriaOut(id=uuid4(), **categoria_in.model_dump())
+        categoria_model = CategoriaModel(**categoria_out.model_dump())
+        
+        db_session.add(categoria_model)
+        await db_session.commit()
+        
+    except IntegrityError as e:
+        # Capturar erro de integridade específico
+        error_message = str(e).lower()
+        
+        if "nome" in error_message:
+            raise HTTPException(
+                status_code=303,
+                detail=f"Já existe uma categoria cadastrada com o nome: {categoria_in.nome}"
+            )
+        elif "unique" in error_message:
+            raise HTTPException(
+                status_code=303,
+                detail="Já existe uma categoria com dados duplicados. Verifique se o nome já não foi cadastrado."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Erro de validação: {str(e)}"
+            )
+            
+    except Exception as e:
+        # Capturar outros erros genéricos
+        print(f"Erro inesperado ao criar categoria: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail='Ocorreu um erro interno ao processar a solicitação. Tente novamente mais tarde.'
+        )
 
     return categoria_out
     
