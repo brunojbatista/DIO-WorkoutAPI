@@ -3,10 +3,9 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, HTTPException, status, Query
 from pydantic import UUID4
 from sqlalchemy.exc import IntegrityError
-# from fastapi_pagination import Page, paginate, add_pagination
-# from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
+from sqlalchemy import func
 
-from workout_api.atleta.schemas import AtletaIn, AtletaOut, AtletaUpdate, AtletaListOut
+from workout_api.atleta.schemas import AtletaIn, AtletaOut, AtletaUpdate, AtletaListOut, PaginatedResponse
 from workout_api.atleta.models import AtletaModel
 from workout_api.categorias.models import CategoriaModel
 from workout_api.centro_treinamento.models import CentroTreinamentoModel
@@ -124,13 +123,16 @@ async def post(
     '/', 
     summary='Consultar todos os Atletas',
     status_code=status.HTTP_200_OK,
-    response_model=list[AtletaListOut],  # TEMPORARIAMENTE SEM PAGINAÇÃO
+    response_model=PaginatedResponse,
 )
 async def query(
     db_session: DatabaseDependency,
     nome: str = Query(None, description='Filtrar por nome do atleta'),
-    cpf: str = Query(None, description='Filtrar por CPF do atleta')
-) -> list[AtletaListOut]:
+    cpf: str = Query(None, description='Filtrar por CPF do atleta'),
+    limit: int = Query(10, ge=1, le=100, description='Número de itens por página'),
+    offset: int = Query(0, ge=0, description='Número de itens para pular')
+) -> PaginatedResponse:
+    # Query base
     query = select(AtletaModel)
     
     # Aplicar filtros se fornecidos
@@ -139,7 +141,15 @@ async def query(
     if cpf:
         query = query.filter(AtletaModel.cpf.ilike(f'%{cpf}%'))
     
-    # Executar query SEM paginação (TEMPORARIAMENTE)
+    # Query para contar total de registros
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db_session.execute(count_query)
+    total = total_result.scalar()
+    
+    # Aplicar paginação
+    query = query.limit(limit).offset(offset)
+    
+    # Executar query
     result = await db_session.execute(query)
     atletas = result.scalars().all()
     
@@ -153,7 +163,21 @@ async def query(
         )
         atletas_list.append(atleta_list_out)
     
-    return atletas_list
+    # Calcular informações de paginação
+    page = (offset // limit) + 1
+    pages = (total + limit - 1) // limit  # Arredondar para cima
+    has_next = offset + limit < total
+    has_prev = offset > 0
+    
+    return PaginatedResponse(
+        items=atletas_list,
+        total=total,
+        page=page,
+        size=limit,
+        pages=pages,
+        has_next=has_next,
+        has_prev=has_prev
+    )
 
 
 @router.get(
