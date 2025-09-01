@@ -30,6 +30,7 @@ async def post(
     categoria_nome = atleta_in.categoria.nome
     centro_treinamento_nome = atleta_in.centro_treinamento.nome
 
+    # Verificar se a categoria existe
     categoria = (await db_session.execute(
         select(CategoriaModel).filter_by(nome=categoria_nome))
     ).scalars().first()
@@ -40,6 +41,7 @@ async def post(
             detail=f'A categoria {categoria_nome} não foi encontrada.'
         )
     
+    # Verificar se o centro de treinamento existe
     centro_treinamento = (await db_session.execute(
         select(CentroTreinamentoModel).filter_by(nome=centro_treinamento_nome))
     ).scalars().first()
@@ -48,6 +50,28 @@ async def post(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail=f'O centro de treinamento {centro_treinamento_nome} não foi encontrado.'
+        )
+    
+    # VERIFICAÇÃO PRÉVIA: Verificar se CPF já existe
+    cpf_existente = (await db_session.execute(
+        select(AtletaModel).filter_by(cpf=atleta_in.cpf))
+    ).scalars().first()
+    
+    if cpf_existente:
+        raise HTTPException(
+            status_code=303,
+            detail=f"Já existe um atleta cadastrado com o CPF: {atleta_in.cpf}"
+        )
+    
+    # VERIFICAÇÃO PRÉVIA: Verificar se nome já existe
+    nome_existente = (await db_session.execute(
+        select(AtletaModel).filter_by(nome=atleta_in.nome))
+    ).scalars().first()
+    
+    if nome_existente:
+        raise HTTPException(
+            status_code=303,
+            detail=f"Já existe um atleta cadastrado com o nome: {atleta_in.nome}"
         )
     
     try:
@@ -61,7 +85,7 @@ async def post(
         await db_session.commit()
         
     except IntegrityError as e:
-        # Capturar erro de integridade específico
+        # Capturar erro de integridade específico (fallback)
         error_message = str(e).lower()
         
         if "cpf" in error_message:
@@ -69,10 +93,15 @@ async def post(
                 status_code=303,
                 detail=f"Já existe um atleta cadastrado com o CPF: {atleta_in.cpf}"
             )
+        elif "nome" in error_message:
+            raise HTTPException(
+                status_code=303,
+                detail=f"Já existe um atleta cadastrado com o nome: {atleta_in.nome}"
+            )
         elif "unique" in error_message:
             raise HTTPException(
                 status_code=303,
-                detail="Já existe um atleta com dados duplicados. Verifique se o CPF já não foi cadastrado."
+                detail="Já existe um atleta com dados duplicados. Verifique se o CPF ou nome já não foram cadastrados."
             )
         else:
             raise HTTPException(
@@ -85,7 +114,7 @@ async def post(
         print(f"Erro inesperado ao criar atleta: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail='Ocorreu um erro interno ao processar a solicitação. Tente novamente mais tarde.'
+            detail='Erro interno do servidor. Entre em contato com o suporte técnico.'
         )
 
     return atleta_out
